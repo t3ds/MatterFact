@@ -19,6 +19,7 @@ import {
 import { read, upload } from "./services/mockRemote";
 
 const TABLE_ID = "main";
+const MAX_HISTORY = 10;
 
 export default function App() {
   const [table, setTable] = useState(() => createTable({ rowCount: 5, colCount: 5 }));
@@ -30,6 +31,35 @@ export default function App() {
   // Save
   const [status, setStatus] = useState("");
   const saveQueue = useRef(Promise.resolve());
+  const undoStackRef = useRef([]);
+  const redoStackRef = useRef([]);
+
+  //push current state into undo stack, clear redo stack.
+  // This is called for all functions to store the current state into the stack before the change is made.
+  // All of this could be tied into the autosave as well by calling the autosave function after this in place of setTable at the end when passing the props to SpreadsheetTable.
+  function handleChange(nextTable) {
+    undoStackRef.current.push(serializeTable(nextTable));
+    if (undoStackRef.current.length > MAX_HISTORY) {
+      undoStackRef.current = undoStackRef.current.slice(-MAX_HISTORY);
+    }
+    redoStackRef.current = []; //clear redo stack on new change
+  }
+
+  //undo: pop from stack, push current state into redo stack, set table to previous state
+  function handleUndo() {
+    if (undoStackRef.current.length === 0) return;
+    const prevTable = undoStackRef.current.pop();
+    redoStackRef.current.push(serializeTable(table));
+    setTable(deserializeTable(prevTable));
+  }
+
+  //redo: pop from redo stack, push current state into undo stack, set table to next state
+  function handleRedo() {
+    if (redoStackRef.current.length === 0) return;
+    const nextTable = redoStackRef.current.pop();
+    undoStackRef.current.push(serializeTable(table));
+    setTable(deserializeTable(nextTable));
+  }
 
   async function handleSave() {
     try {
@@ -96,6 +126,8 @@ export default function App() {
         <button type="button" onClick={handleLoad}>
           Load
         </button>
+        <button type="button" onClick={handleUndo} disabled={undoStackRef.current.length === 0}>Undo</button>
+        <button type="button" onClick={handleRedo} disabled={redoStackRef.current.length === 0}>Redo</button>
         <span className="status" aria-live="polite">
           {status}
         </span>
@@ -103,27 +135,52 @@ export default function App() {
 
       <SpreadsheetTable
         table={table}
-        onAddRow={() => setTable((t) => addRow(t))}
-        onAddColumn={() => setTable((t) => addColumn(t))}
+        onAddRow={() => {
+          handleChange(table);
+          setTable((t)=>addRow(t))
+        }}
+        onAddColumn={() => {
+          handleChange(table);
+          setTable((t)=>addColumn(t))
+        }}
         onMoveRow={(rowIndex, direction) =>
-          setTable((t) => moveRow(t, rowIndex, direction))
+          {
+            handleChange(table);
+            setTable((t)=>moveRow(t, rowIndex, direction))
+          }
         }
         onMoveRowTo={(fromIndex, toIndex) =>
-          setTable((t) => moveRowTo(t, fromIndex, toIndex))
+          {
+            handleChange(table);
+            setTable((t)=>moveRowTo(t, fromIndex, toIndex))
+          }
         }
         onDeleteRow={(rowIndex) => {
+          handleChange(table);
           const nextTable = deleteRow(table, rowIndex);
           deleteAndSave(nextTable);
         }}
         onMoveColumn={(colIndex, direction) =>
-          setTable((t) => moveColumn(t, colIndex, direction))
+          {
+            handleChange(table);
+            setTable((t)=>moveColumn(t, colIndex, direction))
+          }
         }
         onMoveColumnTo={(fromIndex, toIndex) =>
-          setTable((t) => moveColumnTo(t, fromIndex, toIndex))
+          {
+            handleChange(table);
+            setTable((t)=>moveColumnTo(t, fromIndex, toIndex))
+          }
         }
-        onDeleteColumn={(colIndex) => setTable((t) => deleteColumn(t, colIndex))}
+        onDeleteColumn={(colIndex) => {
+          handleChange(table);
+          setTable((t)=>deleteColumn(t, colIndex))
+        }}
         onCellChange={(rowIndex, colIndex, value) =>
-          setTable((t) => updateCell(t, rowIndex, colIndex, value))
+          {
+            handleChange(table);
+            setTable((t)=>updateCell(t, rowIndex, colIndex, value))
+          }
         }
       />
     </div>
